@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>同盟スケジュールボード</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <style>
+        :root {
+            --bg-main: #0f172a;      /* slate-900 */
+            --bg-card: #1e293b;      /* slate-800 */
+            --bg-header: #334155;    /* slate-700 */
+            --border-color: #334155; /* slate-700 */
+            --accent: #6366f1;       /* indigo-500 */
+        }
+        body {
+            font-family: 'Inter', 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+            background-color: var(--bg-main);
+            color: #f8fafc;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* --- Tabs --- */
+        .tab-btn {
+            white-space: nowrap;
+            padding: 0.75rem 1rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #94a3b8;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .tab-btn.active {
+            color: #818cf8;
+            border-bottom-color: #818cf8;
+        }
+
+        /* --- Calendar Grid Layout (Horizontal Scroll) --- */
+        .calendar-scroll-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+            scrollbar-color: #475569 transparent;
+        }
+        
+        .calendar-table-container {
+            display: inline-flex;
+            flex-direction: column;
+            min-width: max-content;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            margin: 1rem;
+        }
+
+        /* Sticky Left Column */
+        .sticky-col {
+            position: sticky;
+            left: 0;
+            z-index: 10;
+            background-color: #0f172a; 
+            border-right: 1px solid var(--border-color);
+        }
+        .sticky-col-header {
+            z-index: 20;
+        }
+
+        /* Fixed Widths */
+        .col-week { width: 60px; min-width: 60px; }
+        .col-day { width: 150px; min-width: 150px; }
+
+        /* Sortable Magnet Styles */
+        .magnet-event {
+            cursor: grab;
+            user-select: none;
+            touch-action: pan-y; 
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        .magnet-event:active { cursor: grabbing; }
+        .sortable-ghost { opacity: 0.4; background-color: #cbd5e1 !important; }
+        .sortable-drag {
+            transform: scale(1.05);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            z-index: 50;
+        }
+        
+        .day-container {
+            min-height: 100px;
+            transition: background-color 0.2s;
+        }
+        .day-container.highlight { background-color: rgba(99, 102, 241, 0.15); }
+
+        /* Template List Magnet Styles */
+        .template-list-container {
+            min-height: 50px;
+            transition: background-color 0.2s;
+        }
+
+        /* FAB */
+        .fab {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background-color: var(--accent);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            cursor: pointer;
+            z-index: 40;
+            transition: transform 0.2s, background-color 0.2s;
+        }
+        .fab:hover { background-color: #4f46e5; transform: scale(1.05); }
+        .fab:active { transform: scale(0.95); }
+
+        /* Modals */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(4px);
+            z-index: 100;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .modal-overlay.active { display: flex; }
+
+        /* Custom Scrollbar for wrappers */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        ::-webkit-scrollbar-corner { background: transparent; }
+        
+        .view-section { display: none; }
+        .view-section.active { display: block; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-slate-900/95 backdrop-blur border-b border-slate-700 px-4 py-3 flex justify-between items-center z-30 shrink-0">
+        <h1 class="text-lg font-bold text-white flex items-center gap-2">
+            <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+            Season Board
+        </h1>
+        <div class="flex gap-2 items-center flex-wrap justify-end">
+            <button onclick="requestNotificationPermission()" class="text-xs bg-amber-900/50 hover:bg-amber-800 text-amber-200 border border-amber-700 px-2 py-1.5 rounded transition-colors flex items-center gap-1" title="ブラウザ通知をオンにする">
+                🔔 通知設定
+            </button>
+            <button onclick="exportToCSV()" class="text-xs bg-emerald-900/50 hover:bg-emerald-800 text-emerald-200 border border-emerald-700 px-2 py-1.5 rounded transition-colors flex items-center gap-1" title="スプレッドシート用に出力">
+                📊 CSV出力
+            </button>
+            <button onclick="exportToTSV()" class="text-xs bg-emerald-900/50 hover:bg-emerald-800 text-emerald-200 border border-emerald-700 px-2 py-1.5 rounded transition-colors flex items-center gap-1" title="クリップボードにコピーしてスプレッドシートに貼り付け">
+                📋 TSVコピー
+            </button>
+            <button onclick="exportAsICS()" class="text-xs bg-blue-900/50 hover:bg-blue-800 text-blue-200 border border-blue-700 px-2 py-1.5 rounded transition-colors flex items-center gap-1" title="スマホのカレンダーアプリに登録して通知を受け取る">
+                📅 カレンダー連携
+            </button>
+            <button onclick="openGroupSettings()" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-2 py-1.5 rounded transition-colors">
+                ⚙️ グループ設定
+            </button>
+            <div class="h-4 w-px bg-slate-600 mx-1 hidden sm:block"></div>
+            <button id="btnReset" class="text-xs bg-red-900/50 hover:bg-red-800 text-red-200 border border-red-700/50 px-3 py-1.5 rounded transition-colors">
+                リセット
+            </button>
+        </div>
+    </header>
+
+    <!-- Tabs Navigation -->
+    <nav class="flex overflow-x-auto bg-slate-900 border-b border-slate-700 no-scrollbar z-20 shrink-0">
+        <button class="tab-btn active" data-target="view-horizontal">横型カレンダー</button>
+        <button class="tab-btn" data-target="view-monthly">月間カレンダー</button>
+        <button class="tab-btn" data-target="view-weekly">今後1週間</button>
+        <button class="tab-btn" data-target="view-daily">タイムライン(今日)</button>
+        <button class="tab-btn" data-target="view-templates">イベントリスト</button>
+    </nav>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 overflow-hidden relative">
+        <!-- View 1: Horizontal Calendar -->
+        <main id="view-horizontal" class="view-section active h-full flex flex-col">
+            <div class="p-3 bg-slate-800 border-b border-slate-700 flex flex-wrap gap-4 items-center shrink-0">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm text-slate-300">表示期間:</span>
+                    <input type="date" id="horizStartDate" class="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-indigo-500">
+                    <span class="text-slate-400">〜</span>
+                    <input type="date" id="horizEndDate" class="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-indigo-500">
+                    <button onclick="renderHorizontalCalendar()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1 rounded text-sm transition-colors shadow">表示</button>
+                </div>
+            </div>
+            <div class="flex-1 overflow-auto calendar-scroll-wrapper">
+                <div id="calendarGrid" class="calendar-table-container">
+                    <!-- JS will populate grid here -->
+                </div>
+            </div>
+        </main>
+
+        <!-- View 2: Monthly Calendar -->
+        <main id="view-monthly" class="view-section h-full overflow-y-auto p-4">
+            <div id="monthlyContainer" class="max-w-4xl mx-auto">
+                <!-- JS will populate monthly calendars here -->
+            </div>
+            <div class="flex justify-center mt-6 mb-12 shrink-0 w-full" id="monthlyLoadMoreContainer">
+                <button onclick="loadMoreMonths()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 px-6 py-2 rounded-full text-sm font-medium transition-colors shadow-lg">
+                    さらに先の月を読み込む ▼
+                </button>
+            </div>
+        </main>
+
+        <!-- View 3: Weekly View -->
+        <main id="view-weekly" class="view-section h-full overflow-y-auto p-4">
+            <div class="max-w-3xl mx-auto">
+                <h2 class="text-lg font-bold text-indigo-300 mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    今後1週間のスケジュール
+                </h2>
+                <div id="weeklyContainer" class="space-y-4">
+                    <!-- JS will populate weekly list here -->
+                </div>
+            </div>
+        </main>
+
+        <!-- View 4: Daily Timeline -->
+        <main id="view-daily" class="view-section h-full overflow-y-auto p-4">
+            <div class="max-w-xl mx-auto">
+                <div class="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden shadow-lg mb-6">
+                    <div class="bg-slate-700 px-4 py-3 border-b border-slate-600 flex justify-between items-center">
+                        <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                            <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            本日のタイムライン
+                        </h2>
+                        <span id="dailyDateLabel" class="text-sm text-slate-300 font-medium"></span>
+                    </div>
+                    <div class="p-4 bg-slate-900" id="dailyAllDayContainer">
+                        <h3 class="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">終日イベント</h3>
+                        <div id="dailyAllDayList" class="flex flex-wrap gap-2"></div>
+                    </div>
+                    <div class="p-4" id="dailyTimelineContainer">
+                        <!-- JS will populate vertical timeline here -->
+                    </div>
+                </div>
+                
+                <!-- お知らせテキスト生成エリア -->
+                <div class="bg-slate-900 p-3 rounded border border-slate-700">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-sm font-bold text-indigo-300">お知らせ用テキスト</h3>
+                        <button onclick="copyDailyAnnouncement('dailyAnnouncementText')" class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded shadow">コピー</button>
+                    </div>
+                    <textarea id="dailyAnnouncementText" class="w-full h-32 bg-slate-800 border border-slate-600 text-sm text-slate-300 p-2 rounded focus:outline-none" readonly></textarea>
+                </div>
+            </div>
+        </main>
+
+        <!-- View 5: Event Templates (List) -->
+        <main id="view-templates" class="view-section h-full overflow-y-auto p-4">
+            <div class="max-w-4xl mx-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold text-indigo-300">イベントリスト (テンプレート)</h2>
+                    <div class="flex gap-2">
+                        <button class="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded transition-colors shadow" onclick="window.openGroupEditModal()">
+                            📋 グループ管理
+                        </button>
+                        <button class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1 shadow" onclick="window.openTemplateModal()">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                            新規イベント作成
+                        </button>
+                    </div>
+                </div>
+                <p class="text-xs text-slate-400 mb-6">リストからイベントを選んで、カレンダーにスタンプしたり詳細指定で追加できます。マグネットでグループ間を移動できます。</p>
+                
+                <div id="templateGroupsContainer" class="space-y-6">
+                    <!-- JS will populate grouped templates here -->
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- FAB (Add Event directly) -->
+    <div id="fabAdd" class="fab">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+    </div>
+
+    <!-- Group Settings Modal (Start Dates) -->
+    <div id="groupModal" class="modal-overlay">
+        <div class="bg-slate-800 border border-slate-600 rounded-xl p-5 w-full max-w-sm shadow-2xl">
+            <h2 class="text-lg font-bold mb-4 text-white">グループ・開始日設定</h2>
+            <p class="text-xs text-slate-400 mb-4">シーズン等のグループごとにDay1（開始日）を設定できます。</p>
+            <div id="groupList" class="space-y-3 mb-4 max-h-60 overflow-y-auto"></div>
+            <div class="flex justify-end gap-2">
+                <button onclick="closeModal('groupModal')" class="px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 rounded text-slate-200">閉じる</button>
+                <button onclick="saveGroups()" class="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 rounded text-white">保存して更新</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Group Edit Modal (Names) -->
+    <div id="groupEditModal" class="modal-overlay">
+        <div class="bg-slate-800 border border-slate-600 rounded-xl p-5 w-full max-w-sm shadow-2xl">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold text-white">イベントグループ管理</h2>
+                <button onclick="closeModal('groupEditModal')" class="text-slate-400 hover:text-white">✕</button>
+            </div>
+            <p class="text-xs text-slate-400 mb-4">イベントリストのカテゴリ（グループ）を追加・編集します。</p>
+            
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="newGroupName" placeholder="新しいグループ名" class="flex-1 bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                <button onclick="addNewGroup()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap">追加</button>
+            </div>
+            
+            <div id="groupEditList" class="space-y-2 mb-4 max-h-60 overflow-y-auto pr-2">
+                <!-- JS populates here -->
+            </div>
+            
+            <div class="flex justify-end">
+                <button onclick="closeModal('groupEditModal')" class="px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 rounded text-slate-200">完了</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Monthly Day Detail Modal (Timeline & Announcement) -->
+    <div id="monthlyDayModal" class="modal-overlay">
+        <div class="bg-slate-800 border border-slate-600 rounded-xl p-5 w-full max-w-md shadow-2xl max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4 shrink-0">
+                <h2 id="monthlyDayModalTitle" class="text-lg font-bold text-white flex items-center gap-2"></h2>
+                <button onclick="closeModal('monthlyDayModal')" class="text-slate-400 hover:text-white">✕</button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto space-y-6 pr-2">
+                <!-- タイムライン表示 -->
+                <div>
+                    <h3 class="text-sm font-bold text-slate-400 border-b border-slate-700 pb-1 mb-3">タイムテーブル</h3>
+                    <div id="monthlyDayTimeline" class="space-y-2"></div>
+                </div>
+
+                <!-- お知らせテキスト生成 -->
+                <div class="bg-slate-900 p-3 rounded border border-slate-700">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-sm font-bold text-indigo-300">お知らせテキスト</h3>
+                        <button onclick="copyDailyAnnouncement('monthlyDayAnnouncementText')" class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded shadow">コピー</button>
+                    </div>
+                    <textarea id="monthlyDayAnnouncementText" class="w-full h-32 bg-slate-800 border border-slate-600 text-sm text-slate-300 p-2 rounded focus:outline-none" readonly></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit/Add Event Modal -->
+    <div id="eventModal" class="modal-overlay">
+        <div class="bg-slate-800 border border-slate-600 rounded-xl p-5 w-full max-w-sm shadow-2xl transform transition-all max-h-[95vh] overflow-y-auto">
+            <h2 id="modalTitle" class="text-lg font-bold mb-4 text-white">イベント編集</h2>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">イベント名</label>
+                    <input type="text" id="eventName" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500" placeholder="例: 殲滅作戦">
+                </div>
+                
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">グループ (対象の開始日基準)</label>
+                    <select id="eventGroupId" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white focus:outline-none">
+                        <!-- Populated via JS -->
+                    </select>
+                </div>
+                
+                <div class="flex gap-4">
+                    <div class="flex-1">
+                        <label class="block text-xs text-slate-400 mb-2">カラー設定</label>
+                        <div class="flex flex-wrap gap-2" id="colorPicker">
+                            <!-- Colors injected via JS -->
+                        </div>
+                    </div>
+                    <div class="w-32" id="timeWrapper">
+                        <label class="block text-xs text-slate-400 mb-1">開始時間 (任意)</label>
+                        <input type="time" id="eventTime" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 mb-2">
+                        <label class="block text-xs text-slate-400 mb-1">終了時間 (任意)</label>
+                        <input type="time" id="eventEndTime" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+                </div>
+
+                <div class="flex flex-col gap-3" id="dayWrapper">
+                    <div class="flex-1">
+                        <label class="block text-xs text-slate-400 mb-1">開始 (Day数 または 日付)</label>
+                        <div class="flex gap-2">
+                            <div class="relative w-20 flex-shrink-0">
+                                <span class="absolute left-2 top-2 text-xs text-slate-500">Day</span>
+                                <input type="number" id="eventStartDay" min="1" class="w-full bg-slate-900 border border-slate-600 rounded pl-8 pr-2 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                            </div>
+                            <input type="date" id="eventStartDate" class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                        </div>
+                    </div>
+                    <div class="flex-1">
+                        <label class="block text-xs text-slate-400 mb-1">終了 (Day数 または 日付)</label>
+                        <div class="flex gap-2">
+                            <div class="relative w-20 flex-shrink-0">
+                                <span class="absolute left-2 top-2 text-xs text-slate-500">Day</span>
+                                <input type="number" id="eventEndDay" min="1" class="w-full bg-slate-900 border border-slate-600 rounded pl-8 pr-2 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                            </div>
+                            <input type="date" id="eventEndDate" class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="repeatConfigSection" class="mt-2 border-t border-slate-700 pt-3">
+                    <label class="block text-xs text-slate-400 mb-1">繰り返し (開始〜終了の期間内)</label>
+                    <select id="eventRepeatType" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white focus:outline-none mb-2">
+                        <option value="none">毎日 (連続追加) / 当日限り</option>
+                        <option value="interval">数日おき</option>
+                        <option value="weekly">毎週指定の曜日</option>
+                    </select>
+                    
+                    <div id="repeatIntervalDiv" class="hidden">
+                        <label class="block text-xs text-slate-400 mb-1">間隔 (例: 2なら1日あけて次)</label>
+                        <input type="number" id="eventRepeatInterval" min="2" value="2" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white focus:outline-none">
+                    </div>
+                    
+                    <div id="repeatWeeklyDiv" class="hidden">
+                        <label class="block text-xs text-slate-400 mb-1">曜日</label>
+                        <select id="eventRepeatWeekly" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white focus:outline-none">
+                            <option value="1">月曜日</option>
+                            <option value="2">火曜日</option>
+                            <option value="3">水曜日</option>
+                            <option value="4">木曜日</option>
+                            <option value="5">金曜日</option>
+                            <option value="6">土曜日</option>
+                            <option value="0">日曜日</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 flex justify-between items-center border-t border-slate-700 pt-4">
+                <button id="btnDeleteEvent" class="text-sm text-red-400 hover:text-red-300 font-medium px-2 py-1">
+                    削除
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closeModal('eventModal')" class="px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 rounded text-slate-200 transition-colors">
+                        キャンセル
+                    </button>
+                    <button onclick="handleSaveEvent()" class="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 rounded text-white transition-colors">
+                        保存
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Modal -->
+    <div id="confirmModal" class="modal-overlay">
+        <div class="bg-slate-800 border border-slate-600 rounded-xl p-5 w-full max-w-sm shadow-2xl text-center">
+            <h2 id="confirmTitle" class="text-lg font-bold mb-2 text-white">確認</h2>
+            <p id="confirmMessage" class="text-sm text-slate-300 mb-6 whitespace-pre-wrap">本当に実行しますか？</p>
+            <div class="flex justify-center gap-3">
+                <button onclick="closeModal('confirmModal')" class="px-5 py-2 text-sm bg-slate-700 hover:bg-slate-600 rounded text-slate-200 transition-colors">
+                    キャンセル
+                </button>
+                <button id="btnConfirmOk" class="px-5 py-2 text-sm bg-red-600 hover:bg-red-500 rounded text-white transition-colors">
+                    実行
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stamp Mode Bar -->
+    <div id="stampModeBar" class="fixed bottom-24 left-1/2 transform -translate-x-1/2 bg-indigo-600 border border-indigo-400 text-white px-5 py-3 rounded-full shadow-[0_0_20px_rgba(99,102,241,0.5)] z-50 flex items-center gap-3 hidden transition-all">
+        <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
+            <span class="text-sm font-bold truncate max-w-[120px] sm:max-w-[200px]" id="stampTemplateName"></span>
+            <span class="text-xs opacity-90 hidden sm:inline">をスタンプモード中...</span>
+        </div>
+        <div class="w-px h-5 bg-indigo-400 mx-1"></div>
+        <button onclick="endStampMode()" class="bg-indigo-800 hover:bg-indigo-900 px-4 py-1.5 rounded-full text-xs font-medium transition-colors shadow-inner whitespace-nowrap">
+            終了する
+        </button>
+    </div>
+
+    <!-- Application Logic -->
+    <script>
+        const PRESET_COLORS = ['#10b981', '#f43f5e', '#6366f1', '#d946ef', '#eab308', '#0ea5e9', '#f97316', '#8b5cf6'];
+        const DAYS_IN_WEEK = 7;
+        
+        // State
+        let eventGroups = JSON.parse(localStorage.getItem('season_groups')) || [
+            { id: 'group_season', name: 'シーズンイベント', startDate: new Date().toISOString().split('T')[0] },
+            { id: 'group_expedition', name: '世界遠征', startDate: new Date().toISOString().split('T')[0] },
+            { id: 'group_misc', name: 'その他', startDate: new Date().toISOString().split('T')[0] }
+        ];
+        
+        let events = JSON.parse(localStorage.getItem('season_events')) || [];
+        let customTemplates = JSON.parse(localStorage.getItem('season_custom_templates')) || [];
+        
+        let sortableInstances = [];
+        let templateSortableInstances = [];
+        let isDragging = false;
+        let confirmAction = null;
+        
+        // Month Render state
+        let renderStartMonth = new Date();
+        if(eventGroups.length > 0 && eventGroups[0].startDate) {
+            renderStartMonth = new Date(eventGroups[0].startDate);
+        }
+        let renderMonthCount = 3;
+        
+        // Stamp mode state
+        window.stampTemplate = null;
+
+        // Modal Edit State
+        let isEditingTemplate = false;
+        let currentEditingId = null;
+        let originalTemplateText = null;
+        let originalTemplateColor = null;
+        let selectedColor = PRESET_COLORS[0];
+
+        // Init
+        function initApp() {
+            if (events.length === 0) resetToInitialData(false);
+            
+            // Default horizontal period
+            if (eventGroups.length > 0 && eventGroups[0].startDate) {
+                const s = new Date(eventGroups[0].startDate);
+                document.getElementById('horizStartDate').value = s.toISOString().split('T')[0];
+                s.setDate(s.getDate() + 55);
+                document.getElementById('horizEndDate').value = s.toISOString().split('T')[0];
+            } else {
+                const today = new Date();
+                document.getElementById('horizStartDate').value = today.toISOString().split('T')[0];
+                const nextMonth = new Date(today);
+                nextMonth.setMonth(nextMonth.getMonth() + 1);
+                document.getElementById('horizEndDate').value = nextMonth.toISOString().split('T')[0];
+            }
+            
+            setupUI();
+            updateAllViews();
+            startNotificationService();
+        }
+
+        function saveToLocalStorage() {
+            localStorage.setItem('season_events', JSON.stringify(events));
+            localStorage.setItem('season_groups', JSON.stringify(eventGroups));
+            localStorage.setItem('season_custom_templates', JSON.stringify(customTemplates));
+        }
+
+        function getActualDates(eventList) {
+            let processed = [];
+            eventList.forEach(ev => {
+                const group = eventGroups.find(g => g.id === ev.groupId);
+                if (group && group.startDate && ev.day) {
+                    const date = new Date(group.startDate);
+                    date.setDate(date.getDate() + (ev.day - 1));
+                    const actualDate = date.toISOString().split('T')[0];
+                    processed.push({ ...ev, actualDate });
+                } else if (ev.actualDate) {
+                    processed.push({ ...ev });
+                }
+            });
+            return processed;
+        }
+
+        // --- Renderers ---
+        function updateAllViews() {
+            renderHorizontalCalendar();
+            renderMonthlyView();
+            renderWeeklyView();
+            renderDailyView();
+            renderTemplatesView();
+        }
+
+        // 1. Horizontal View
+        function renderHorizontalCalendar() {
+            const gridContainer = document.getElementById('calendarGrid');
+            gridContainer.innerHTML = '';
+            
+            sortableInstances.forEach(si => si.destroy());
+            sortableInstances = [];
+
+            const startStr = document.getElementById('horizStartDate').value;
+            const endStr = document.getElementById('horizEndDate').value;
+            if(!startStr || !endStr) return;
+
+            const startDate = new Date(startStr);
+            const endDate = new Date(endStr);
+            if(startDate > endDate) return;
+
+            // adjust to previous Monday
+            const startDay = startDate.getDay();
+            const diff = startDate.getDate() - startDay + (startDay === 0 ? -6 : 1); 
+            const iterDate = new Date(startDate.setDate(diff));
+
+            const daysOfWeek = ['月 (Mon)', '火 (Tue)', '水 (Wed)', '木 (Thu)', '金 (Fri)', '土 (Sat)', '日 (Sun)'];
+            const actualEvents = getActualDates(events);
+            const todayStr = new Date().toISOString().split('T')[0];
+
+            // Header Row
+            const headerRow = document.createElement('div');
+            headerRow.className = 'flex border-b border-slate-700 bg-slate-800 rounded-t-lg';
+            const cornerCell = document.createElement('div');
+            cornerCell.className = 'col-week flex-shrink-0 sticky-col sticky-col-header bg-slate-900 border-r border-slate-700 flex items-center justify-center';
+            cornerCell.innerHTML = '<span class="text-xs font-bold text-slate-400">日付</span>';
+            headerRow.appendChild(cornerCell);
+
+            for (let i = 0; i < 7; i++) {
+                const th = document.createElement('div');
+                th.className = 'col-day flex-shrink-0 px-3 py-2 text-center text-sm font-bold text-slate-300 border-r border-slate-700 last:border-r-0';
+                th.innerText = daysOfWeek[i];
+                headerRow.appendChild(th);
+            }
+            gridContainer.appendChild(headerRow);
+
+            let weekCount = 1;
+            
+            while(iterDate <= endDate || iterDate.getDay() !== 1) {
+                if(iterDate.getDay() === 1) { // Monday
+                    const weekRow = document.createElement('div');
+                    weekRow.className = 'flex border-b border-slate-700 last:border-b-0 bg-slate-800';
+                    weekRow.dataset.week = weekCount;
+                    
+                    const stickyWeek = document.createElement('div');
+                    stickyWeek.className = 'col-week flex-shrink-0 sticky-col flex items-center justify-center border-r border-slate-700 bg-slate-900';
+                    stickyWeek.innerHTML = `<span class="font-bold text-slate-400 text-[10px] writing-mode-vertical whitespace-nowrap -rotate-90 origin-center tracking-widest">${iterDate.getMonth()+1}月</span>`;
+                    weekRow.appendChild(stickyWeek);
+                    gridContainer.appendChild(weekRow);
+                    weekCount++;
+                }
+                
+                const currentWeekRow = gridContainer.lastChild;
+                const dStr = iterDate.toISOString().split('T')[0];
+                const isToday = dStr === todayStr;
+                
+                const dayCell = document.createElement('div');
+                let bgClass = isToday ? 'bg-indigo-900/20' : '';
+                dayCell.className = `col-day flex-shrink-0 flex flex-col p-2 border-r border-slate-700 last:border-r-0 ${bgClass}`;
+                
+                const dayEvs = actualEvents.filter(e => e.actualDate === dStr).sort((a,b) => (a.time||'24:00').localeCompare(b.time||'24:00'));
+
+                dayCell.innerHTML = `
+                    <div class="flex justify-between items-center mb-2 border-b border-slate-700/50 pb-1">
+                        <span class="text-xs font-bold ${isToday ? 'text-indigo-400' : 'text-slate-300'}">${iterDate.getMonth()+1}/${iterDate.getDate()}</span>
+                        <button class="text-slate-500 hover:text-white p-0.5 rounded transition-colors hover:bg-slate-700" onclick="window.handleHorizDayClick('${dStr}')">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M12 4v16m8-8H4"></path></svg>
+                        </button>
+                    </div>
+                    <div class="day-container flex-1 flex flex-col gap-1.5" data-date="${dStr}" onclick="if(window.stampTemplate && event.target === this) window.handleHorizDayClick('${dStr}')">
+                        ${dayEvs.map(ev => createEventHTML(ev)).join('')}
+                    </div>
+                `;
+                currentWeekRow.appendChild(dayCell);
+                
+                iterDate.setDate(iterDate.getDate() + 1);
+            }
+
+            // Init Sortable for Horizontal View
+            document.querySelectorAll('#view-horizontal .day-container').forEach(el => {
+                sortableInstances.push(new Sortable(el, {
+                    group: 'horizontal-events',
+                    animation: 150, delay: 200, delayOnTouchOnly: true,
+                    ghostClass: 'sortable-ghost', dragClass: 'sortable-drag',
+                    onStart: (evt) => { isDragging = true; evt.from.classList.add('highlight'); },
+                    onEnd: (evt) => {
+                        isDragging = false;
+                        document.querySelectorAll('.day-container').forEach(c => c.classList.remove('highlight'));
+                        const ev = events.find(e => e.id === evt.item.dataset.id);
+                        if (ev) {
+                            const newDateStr = evt.to.dataset.date;
+                            // Calculate new Day relative to its group, or just store exact date
+                            const group = eventGroups.find(g => g.id === ev.groupId);
+                            if(group && group.startDate) {
+                                const diffTime = new Date(newDateStr).getTime() - new Date(group.startDate).getTime();
+                                ev.day = Math.floor(diffTime / (1000*60*60*24)) + 1;
+                            }
+                            saveToLocalStorage();
+                            updateAllViews();
+                        }
+                    }
+                }));
+            });
+        }
+
+        // 2. Monthly View
+        function renderMonthlyView() {
+            const container = document.getElementById('monthlyContainer');
+            container.innerHTML = '';
+            
+            let current = new Date(renderStartMonth.getFullYear(), renderStartMonth.getMonth(), 1);
+            const actualEvents = getActualDates(events);
+            const todayStr = new Date().toISOString().split('T')[0];
+
+            for (let i = 0; i < renderMonthCount; i++) {
+                const y = current.getFullYear();
+                const m = current.getMonth();
+                
+                const monthDiv = document.createElement('div');
+                monthDiv.className = 'bg-slate-800 rounded-lg p-4 mb-6 shadow border border-slate-700';
+                
+                let html = `<h3 class="text-lg font-bold text-white mb-3 text-center">${y}年 ${m + 1}月</h3>`;
+                html += `<div class="grid grid-cols-7 gap-1 text-center text-xs font-bold text-slate-400 mb-2">
+                            <div class="text-red-400">日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div class="text-blue-400">土</div>
+                         </div><div class="grid grid-cols-7 gap-1">`;
+                
+                const firstDay = new Date(y, m, 1).getDay();
+                const daysInMonth = new Date(y, m + 1, 0).getDate();
+                
+                for (let j = 0; j < firstDay; j++) {
+                    html += `<div class="p-1 min-h-[80px] bg-slate-800/30 rounded border border-transparent"></div>`;
+                }
+                
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dateStr = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                    const dayEvents = actualEvents.filter(e => e.actualDate === dateStr).sort((a,b) => (a.time||'24:00').localeCompare(b.time||'24:00'));
+                    
+                    const isToday = dateStr === todayStr;
+                    const borderClass = isToday ? 'border-indigo-500 border-2' : 'border-slate-700/50';
+                    const bgClass = isToday ? 'bg-indigo-900/20' : 'bg-slate-700/30';
+                    
+                    let evHtml = dayEvents.map(e => `
+                        <div class="text-[10px] text-white px-1 mt-1 rounded leading-tight shadow-sm truncate" style="background:${e.color}">
+                            ${e.time ? `<span class="opacity-75 font-mono">${e.time}</span> ` : ''}${e.text}
+                        </div>
+                    `).join('');
+
+                    html += `
+                        <div class="p-1 min-h-[80px] rounded border ${borderClass} ${bgClass} cursor-pointer hover:bg-slate-700 transition-colors flex flex-col" onclick="openMonthlyDayModal('${dateStr}')">
+                            <div class="text-right text-xs font-bold ${isToday ? 'text-indigo-400' : 'text-slate-300'}">${d}</div>
+                            <div class="flex-1 flex flex-col gap-0.5">${evHtml}</div>
+                        </div>`;
+                }
+                html += `</div>`;
+                monthDiv.innerHTML = html;
+                container.appendChild(monthDiv);
+                
+                current.setMonth(current.getMonth() + 1);
+            }
+        }
+
+        function loadMoreMonths() {
+            renderMonthCount += 3;
+            renderMonthlyView();
+        }
+
+        // 3. Weekly View
+        function renderWeeklyView() {
+            const container = document.getElementById('weeklyContainer');
+            const actualEvents = getActualDates(events);
+            const today = new Date();
+            let html = '';
+            let hasEvents = false;
+
+            for (let offset = 0; offset < 7; offset++) {
+                const targetDate = new Date(today);
+                targetDate.setDate(targetDate.getDate() + offset);
+                const dStr = targetDate.toISOString().split('T')[0];
+                
+                const dayEvents = actualEvents.filter(e => e.actualDate === dStr).sort((a,b) => (a.time||'24:00').localeCompare(b.time||'24:00'));
+                const isToday = offset === 0;
+                
+                html += `
+                    <div class="bg-slate-800 rounded border ${isToday ? 'border-indigo-500' : 'border-slate-700'} p-3 flex gap-4">
+                        <div class="w-16 flex-shrink-0 text-center flex flex-col justify-center border-r border-slate-700 pr-3">
+                            <span class="text-lg font-bold ${isToday ? 'text-indigo-400' : 'text-slate-200'}">${targetDate.getMonth()+1}/${targetDate.getDate()}</span>
+                            <span class="text-xs text-slate-500">(${['日','月','火','水','木','金','土'][targetDate.getDay()]})</span>
+                        </div>
+                        <div class="flex-1 flex flex-col justify-center">
+                            ${dayEvents.length === 0 ? '<span class="text-sm text-slate-500 italic">予定なし</span>' : ''}
+                            <div class="flex flex-wrap gap-2">
+                                ${dayEvents.map(e => `
+                                    <div class="text-xs text-white px-2 py-1 rounded shadow-sm flex items-center gap-1 cursor-pointer hover:opacity-80" style="background:${e.color}" onclick="openEventModalById('${e.id}')">
+                                        ${e.time ? `<span class="opacity-75 font-mono">${e.time}</span> ` : ''}<span>${e.text}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>`;
+            }
+            container.innerHTML = html;
+        }
+
+        // 4. Daily View
+        function renderDailyView() {
+            const now = new Date();
+            const todayStr = now.toISOString().split('T')[0];
+            document.getElementById('dailyDateLabel').innerText = `${now.getMonth()+1}/${now.getDate()} (${['日','月','火','水','木','金','土'][now.getDay()]})`;
+            
+            const actualEvents = getActualDates(events).filter(e => e.actualDate === todayStr);
+            const allDayEvents = actualEvents.filter(e => !e.time);
+            const timedEvents = actualEvents.filter(e => e.time).sort((a,b) => a.time.localeCompare(b.time));
+            
+            document.getElementById('dailyAllDayList').innerHTML = allDayEvents.length === 0 ? 
+                '<span class="text-sm text-slate-500">終日イベントはありません</span>' :
+                allDayEvents.map(e => `<div class="text-xs text-white px-2 py-1 rounded shadow-sm cursor-pointer" style="background:${e.color}" onclick="openEventModalById('${e.id}')">${e.text}</div>`).join('');
+                
+            document.getElementById('dailyTimelineContainer').innerHTML = timedEvents.length === 0 ?
+                '<p class="text-sm text-slate-500 text-center py-4">本日の時間指定イベントはありません</p>' :
+                `<div class="relative border-l-2 border-slate-700 ml-3 space-y-6">
+                    ${timedEvents.map(e => `
+                        <div class="relative pl-6 cursor-pointer hover:bg-slate-800 rounded p-1 transition-colors" onclick="openEventModalById('${e.id}')">
+                            <div class="absolute w-3 h-3 rounded-full -left-[7px] top-1" style="background:${e.color}"></div>
+                            <div class="flex items-baseline gap-2 mb-1">
+                                <span class="font-bold text-slate-300 font-mono text-sm">${e.time}</span>
+                                ${e.endTime ? `<span class="text-xs text-slate-500">- ${e.endTime}</span>` : ''}
+                            </div>
+                            <div class="text-sm font-medium text-white">${e.text}</div>
+                        </div>
+                    `).join('')}
+                </div>`;
+                
+            generateDailyAnnouncement(actualEvents, now, 'dailyAnnouncementText');
+        }
+
+        // 5. Templates View
+        function renderTemplatesView() {
+            const container = document.getElementById('templateGroupsContainer');
+            container.innerHTML = '';
+            
+            templateSortableInstances.forEach(si => si.destroy());
+            templateSortableInstances = [];
+
+            eventGroups.forEach(group => {
+                const groupTemplates = customTemplates.filter(t => t.groupId === group.id);
+                
+                const groupDiv = document.createElement('div');
+                groupDiv.className = 'bg-slate-800/50 border border-slate-700 rounded-lg p-3';
+                groupDiv.innerHTML = `<h3 class="text-sm font-bold text-slate-400 mb-3">${group.name}</h3>`;
+                
+                const listDiv = document.createElement('div');
+                listDiv.className = 'template-list-container grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3';
+                listDiv.dataset.groupId = group.id;
+                
+                if (groupTemplates.length === 0) {
+                    listDiv.innerHTML = '<div class="text-xs text-slate-500 col-span-full py-2 italic">イベントがありません。ここへドラッグして移動できます。</div>';
+                } else {
+                    listDiv.innerHTML = groupTemplates.map(t => {
+                        const count = events.filter(e => e.text === t.text && e.color === t.color && e.groupId === t.groupId).length;
+                        return `
+                        <div class="bg-slate-800 border border-slate-600 rounded p-3 flex flex-col gap-3 shadow magnet-event" data-id="${t.id}" onclick="if(!isDragging) window.openTemplateModal('${t.id}')">
+                            <div class="flex items-center gap-2">
+                                <div class="w-3 h-3 rounded-full flex-shrink-0" style="background:${t.color}"></div>
+                                <span class="text-sm text-white font-medium truncate">${t.text}</span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-[10px] text-slate-400">配置数: ${count}</span>
+                                <button class="text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded shadow-sm" onclick="event.stopPropagation(); window.startStampMode('${t.text}', '${t.color}', '${t.groupId}')">
+                                    スタンプ
+                                </button>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
+                
+                groupDiv.appendChild(listDiv);
+                container.appendChild(groupDiv);
+                
+                templateSortableInstances.push(new Sortable(listDiv, {
+                    group: 'templates',
+                    animation: 150, delay: 200, delayOnTouchOnly: true,
+                    ghostClass: 'sortable-ghost', dragClass: 'sortable-drag',
+                    onStart: () => isDragging = true,
+                    onEnd: (evt) => {
+                        isDragging = false;
+                        const t = customTemplates.find(x => x.id === evt.item.dataset.id);
+                        if (t) {
+                            t.groupId = evt.to.dataset.groupId;
+                            // Update corresponding events group ID too
+                            events.forEach(e => {
+                                if(e.text === t.text && e.color === t.color) e.groupId = t.groupId;
+                            });
+                            saveToLocalStorage();
+                            updateAllViews();
+                        }
+                    }
+                }));
+            });
+        }
+
+        function createEventHTML(ev) {
+            return `<div class="magnet-event rounded px-2 py-1 text-[10px] text-white font-medium shadow border border-black/20 break-words leading-tight flex flex-col" style="background-color:${ev.color};" data-id="${ev.id}" onclick="if(!isDragging) openEventModalById('${ev.id}')">
+                ${ev.time ? `<span class="opacity-80 font-mono text-[9px] mb-[1px]">${ev.time}</span>` : ''}
+                <span>${ev.text}</span>
+            </div>`;
+        }
+
+        // --- Interaction Handlers ---
+        window.handleHorizDayClick = function(dateStr) {
+            if (window.stampTemplate) {
+                // Determine Day num if group is known
+                let dayNum = 1;
+                const grp = eventGroups.find(g => g.id === window.stampTemplate.groupId);
+                if (grp && grp.startDate) {
+                    dayNum = Math.floor((new Date(dateStr).getTime() - new Date(grp.startDate).getTime()) / (1000*60*60*24)) + 1;
+                }
+                events.push({
+                    id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                    groupId: window.stampTemplate.groupId,
+                    day: dayNum, actualDate: dateStr,
+                    text: window.stampTemplate.text, time: '', color: window.stampTemplate.color
+                });
+                saveToLocalStorage();
+                updateAllViews();
+            } else {
+                openEventModal(null, dateStr, false, false, true); // true for isDateString
+            }
+        };
+
+        window.openEventModalById = function(id) {
+            const ev = events.find(e => e.id === id);
+            if (ev) openEventModal(ev);
+        };
+
+        window.openTemplateModal = function(templateId = null) {
+            openEventModal(templateId ? customTemplates.find(t => t.id === templateId) : null, null, false, true);
+        };
+
+        window.startStampMode = function(text, color, groupId) {
+            window.stampTemplate = { text, color, groupId };
+            document.getElementById('stampTemplateName').innerText = text;
+            document.getElementById('stampModeBar').classList.remove('hidden');
+            document.querySelector('[data-target="view-horizontal"]').click();
+        };
+
+        function endStampMode() {
+            window.stampTemplate = null;
+            document.getElementById('stampModeBar').classList.add('hidden');
+        }
+
+        // --- Event Edit Modal Logic ---
+        function openEventModal(eventObj = null, targetDayOrDate = null, isFromTemplate = false, asTemplate = false, isDateString = false) {
+            isEditingTemplate = asTemplate;
+            currentEditingId = eventObj ? eventObj.id : null;
+            
+            const title = document.getElementById('modalTitle');
+            const inputName = document.getElementById('eventName');
+            const groupSelect = document.getElementById('eventGroupId');
+            
+            // Populate Groups
+            groupSelect.innerHTML = eventGroups.map(g => `<option value="${g.id}">${g.name}</option>`).join('');
+            
+            buildColorPicker();
+            selectedColor = eventObj ? eventObj.color : PRESET_COLORS[0];
+            updateColorSelection();
+
+            inputName.value = eventObj ? eventObj.text : '';
+            if(eventObj && eventObj.groupId) groupSelect.value = eventObj.groupId;
+            
+            document.getElementById('eventTime').value = eventObj ? (eventObj.time || '') : '';
+            document.getElementById('eventEndTime').value = eventObj ? (eventObj.endTime || '') : '';
+            
+            const inputStartDay = document.getElementById('eventStartDay');
+            const inputEndDay = document.getElementById('eventEndDay');
+            const inputStartDate = document.getElementById('eventStartDate');
+            const inputEndDate = document.getElementById('eventEndDate');
+            const repeatSec = document.getElementById('repeatConfigSection');
+            
+            // Sync logic Day <-> Date based on selected group
+            function syncDates() {
+                const grp = eventGroups.find(g => g.id === groupSelect.value);
+                if(grp && grp.startDate && inputStartDay.value) {
+                    const d = new Date(grp.startDate);
+                    d.setDate(d.getDate() + (parseInt(inputStartDay.value) - 1));
+                    inputStartDate.value = d.toISOString().split('T')[0];
+                }
+                if(grp && grp.startDate && inputEndDay.value) {
+                    const d = new Date(grp.startDate);
+                    d.setDate(d.getDate() + (parseInt(inputEndDay.value) - 1));
+                    inputEndDate.value = d.toISOString().split('T')[0];
+                }
+            }
+            
+            function syncDays() {
+                const grp = eventGroups.find(g => g.id === groupSelect.value);
+                if(grp && grp.startDate && inputStartDate.value) {
+                    const diff = new Date(inputStartDate.value).getTime() - new Date(grp.startDate).getTime();
+                    inputStartDay.value = Math.floor(diff / (1000*60*60*24)) + 1;
+                }
+                if(grp && grp.startDate && inputEndDate.value) {
+                    const diff = new Date(inputEndDate.value).getTime() - new Date(grp.startDate).getTime();
+                    inputEndDay.value = Math.floor(diff / (1000*60*60*24)) + 1;
+                }
+            }
+
+            inputStartDay.oninput = syncDates;
+            inputEndDay.oninput = syncDates;
+            inputStartDate.oninput = syncDays;
+            inputEndDate.oninput = syncDays;
+            groupSelect.onchange = syncDates;
+
+            if (asTemplate) {
+                title.innerText = eventObj ? 'テンプレート編集' : '新規テンプレート作成';
+                originalTemplateText = eventObj ? eventObj.text : null;
+                originalTemplateColor = eventObj ? eventObj.color : null;
+                
+                inputStartDay.value = ''; inputEndDay.value = '';
+                inputStartDay.disabled = false; inputEndDay.disabled = false;
+                repeatSec.style.display = 'block';
+                document.getElementById('btnDeleteEvent').style.display = eventObj ? 'block' : 'none';
+                
+            } else {
+                title.innerText = eventObj ? 'イベント編集' : '新規イベント作成';
+                
+                if (isDateString && targetDayOrDate) {
+                    inputStartDate.value = targetDayOrDate;
+                    inputEndDate.value = targetDayOrDate;
+                    syncDays();
+                } else if (targetDayOrDate) {
+                    inputStartDay.value = targetDayOrDate;
+                    inputEndDay.value = targetDayOrDate;
+                    syncDates();
+                } else if (eventObj) {
+                    inputStartDay.value = eventObj.day || 1;
+                    inputEndDay.value = eventObj.day || 1;
+                    syncDates();
+                }
+                
+                if (eventObj) {
+                    inputEndDay.disabled = true; inputEndDate.disabled = true;
+                    repeatSec.style.display = 'none';
+                } else {
+                    inputEndDay.disabled = false; inputEndDate.disabled = false;
+                    repeatSec.style.display = 'block';
+                }
+                document.getElementById('btnDeleteEvent').style.display = eventObj ? 'block' : 'none';
+            }
+            
+            document.getElementById('eventRepeatType').value = 'none';
+            document.getElementById('eventRepeatType').dispatchEvent(new Event('change'));
+            document.getElementById('eventModal').classList.add('active');
+        }
+
+        function handleSaveEvent() {
+            const text = document.getElementById('eventName').value.trim();
+            const groupId = document.getElementById('eventGroupId').value;
+            const time = document.getElementById('eventTime').value;
+            const endTime = document.getElementById('eventEndTime').value;
+            const startDay = parseInt(document.getElementById('eventStartDay').value);
+            const endDay = parseInt(document.getElementById('eventEndDay').value);
+            
+            if (!text) return alert("イベント名を入力してください。");
+
+            if (isEditingTemplate) {
+                if (currentEditingId) {
+                    const t = customTemplates.find(x => x.id === currentEditingId);
+                    if (t) { t.text = text; t.color = selectedColor; t.groupId = groupId; }
+                    // Update linked events
+                    if (originalTemplateText) {
+                        events.forEach(e => {
+                            if (e.text === originalTemplateText && e.color === originalTemplateColor) {
+                                e.text = text; e.color = selectedColor; e.groupId = groupId;
+                            }
+                        });
+                    }
+                } else {
+                    customTemplates.push({ id: `tpl_${Date.now()}`, text, color: selectedColor, groupId });
+                }
+            } else {
+                if (isNaN(startDay)) return alert("日付/Dayを指定してください。");
+                
+                // Add to templates if new
+                if (!customTemplates.some(t => t.text === text && t.color === selectedColor)) {
+                    customTemplates.push({ id: `tpl_${Date.now()}`, text, color: selectedColor, groupId });
+                }
+
+                if (currentEditingId) {
+                    const ev = events.find(e => e.id === currentEditingId);
+                    if (ev) {
+                        ev.text = text; ev.time = time; ev.endTime = endTime;
+                        ev.color = selectedColor; ev.groupId = groupId; ev.day = startDay;
+                    }
+                } else {
+                    // Batch Add logic
+                    const repeatType = document.getElementById('eventRepeatType').value;
+                    const repeatInterval = parseInt(document.getElementById('eventRepeatInterval').value);
+                    const repeatWeekly = parseInt(document.getElementById('eventRepeatWeekly').value);
+                    const grp = eventGroups.find(g => g.id === groupId);
+
+                    if (isNaN(endDay) || endDay < startDay) return alert("終了日は開始日以降にしてください。");
+
+                    for (let d = startDay; d <= endDay; d++) {
+                        let shouldAdd = false;
+                        if (repeatType === 'none') {
+                            shouldAdd = true;
+                        } else if (repeatType === 'interval') {
+                            if ((d - startDay) % repeatInterval === 0) shouldAdd = true;
+                        } else if (repeatType === 'weekly') {
+                            if(grp && grp.startDate) {
+                                const targetDate = new Date(grp.startDate);
+                                targetDate.setDate(targetDate.getDate() + (d - 1));
+                                if (targetDate.getDay() === repeatWeekly) shouldAdd = true;
+                            }
+                        }
+
+                        if (shouldAdd) {
+                            events.push({
+                                id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                                groupId, day: d, text, time, endTime, color: selectedColor
+                            });
+                        }
+                    }
+                }
+            }
+
+            saveToLocalStorage();
+            updateAllViews();
+            closeModal('eventModal');
+        }
+
+        // --- Monthly Day Detail & Text Gen ---
+        window.openMonthlyDayModal = function(dateStr) {
+            const actualEvents = getActualDates(events).filter(e => e.actualDate === dateStr);
+            const dateObj = new Date(dateStr);
+            const days = ['日', '月', '火', '水', '木', '金', '土'];
+            
+            document.getElementById('monthlyDayModalTitle').innerText = `${dateObj.getMonth()+1}月${dateObj.getDate()}日 (${days[dateObj.getDay()]}) の予定`;
+            
+            const timeline = document.getElementById('monthlyDayTimeline');
+            
+            if (actualEvents.length === 0) {
+                timeline.innerHTML = '<p class="text-sm text-slate-500">予定はありません。</p>';
+            } else {
+                actualEvents.sort((a,b) => (a.time||'24:00').localeCompare(b.time||'24:00'));
+                timeline.innerHTML = actualEvents.map(e => `
+                    <div class="flex items-center gap-3 bg-slate-900 border-l-4 p-2 rounded shadow-sm" style="border-left-color:${e.color}">
+                        <span class="text-sm font-bold text-slate-300 w-12 shrink-0">${e.time || '終日'}</span>
+                        <span class="text-sm text-white">${e.text}</span>
+                    </div>
+                `).join('');
+            }
+            
+            generateDailyAnnouncement(actualEvents, dateObj, 'monthlyDayAnnouncementText');
+            document.getElementById('monthlyDayModal').classList.add('active');
+        };
+
+        function generateDailyAnnouncement(dayEvents, dateObj, textareaId) {
+            const days = ['日', '月', '火', '水', '木', '金', '土'];
+            let textStr = `【本日の予定】 ${dateObj.getMonth()+1}/${dateObj.getDate()} (${days[dateObj.getDay()]})\n\n`;
+            if (dayEvents.length === 0) {
+                textStr += `本日のイベント予定はありません。`;
+            } else {
+                dayEvents.sort((a,b) => (a.time||'24:00').localeCompare(b.time||'24:00'));
+                dayEvents.forEach(e => {
+                    textStr += `・${e.time ? e.time : '[終日]'} ${e.text}\n`;
+                });
+                textStr += `\n各自スタミナ管理と参加をお願いします！`;
+            }
+            document.getElementById(textareaId).value = textStr;
+        }
+
+        window.copyDailyAnnouncement = function(textareaId) {
+            const text = document.getElementById(textareaId).value;
+            navigator.clipboard.writeText(text).then(() => alert("コピーしました。"));
+        };
+
+        // --- Group Settings ---
+        window.openGroupSettings = function() {
+            const list = document.getElementById('groupList');
+            list.innerHTML = eventGroups.map((g, idx) => `
+                <div class="flex flex-col gap-1 bg-slate-900 p-2 rounded border border-slate-700">
+                    <label class="text-xs font-bold text-slate-400">${g.name} の開始日 (Day 1)</label>
+                    <input type="date" id="grpDate_${idx}" value="${g.startDate}" class="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-indigo-500">
+                </div>
+            `).join('');
+            document.getElementById('groupModal').classList.add('active');
+        };
+
+        window.saveGroups = function() {
+            eventGroups.forEach((g, idx) => {
+                const val = document.getElementById(`grpDate_${idx}`).value;
+                if(val) g.startDate = val;
+            });
+            saveToLocalStorage();
+            closeModal('groupModal');
+            if(eventGroups.length > 0 && eventGroups[0].startDate) {
+                renderStartMonth = new Date(eventGroups[0].startDate);
+            }
+            updateAllViews();
+        };
+
+        window.openGroupEditModal = function() {
+            renderGroupEditList();
+            document.getElementById('groupEditModal').classList.add('active');
+        };
+
+        function renderGroupEditList() {
+            const list = document.getElementById('groupEditList');
+            list.innerHTML = eventGroups.map((g, i) => `
+                <div class="flex justify-between items-center bg-slate-900 px-3 py-2 rounded border border-slate-700">
+                    <span class="text-sm font-bold text-slate-200">${g.name}</span>
+                    ${i !== 0 ? `<button onclick="deleteGroup('${g.id}')" class="text-xs text-red-400 hover:text-red-300">削除</button>` : '<span class="text-xs text-slate-500">基本枠</span>'}
+                </div>
+            `).join('');
+        }
+
+        window.addNewGroup = function() {
+            const input = document.getElementById('newGroupName');
+            const name = input.value.trim();
+            if(name) {
+                eventGroups.push({ id: `group_${Date.now()}`, name, startDate: new Date().toISOString().split('T')[0] });
+                input.value = '';
+                saveToLocalStorage();
+                renderGroupEditList();
+                updateAllViews();
+            }
+        };
+
+        window.deleteGroup = function(id) {
+            if(confirm("このグループを削除しますか？\n所属しているイベントは「シーズンイベント」グループに移動されます。")) {
+                eventGroups = eventGroups.filter(g => g.id !== id);
+                events.forEach(e => { if(e.groupId === id) e.groupId = eventGroups[0].id; });
+                customTemplates.forEach(t => { if(t.groupId === id) t.groupId = eventGroups[0].id; });
+                saveToLocalStorage();
+                renderGroupEditList();
+                updateAllViews();
+            }
+        };
+
+        // --- Exports ---
+        window.exportToCSV = function() {
+            const actualEvents = getActualDates(events).sort((a, b) => a.actualDate.localeCompare(b.actualDate) || (a.time||'').localeCompare(b.time||''));
+            let csvContent = "日付,時間,イベント名,グループ\n";
+            actualEvents.forEach(e => {
+                const groupName = eventGroups.find(g => g.id === e.groupId)?.name || '';
+                csvContent += `${e.actualDate},${e.time || '終日'},"${e.text}","${groupName}"\n`;
+            });
+            const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "season_calendar.csv";
+            link.click();
+        };
+
+        window.exportToTSV = function() {
+            const actualEvents = getActualDates(events).sort((a, b) => a.actualDate.localeCompare(b.actualDate) || (a.time||'').localeCompare(b.time||''));
+            let tsvContent = "日付\t時間\tイベント名\tグループ\n";
+            actualEvents.forEach(e => {
+                const groupName = eventGroups.find(g => g.id === e.groupId)?.name || '';
+                tsvContent += `${e.actualDate}\t${e.time || '終日'}\t${e.text}\t${groupName}\n`;
+            });
+            navigator.clipboard.writeText(tsvContent).then(() => alert("クリップボードにコピーしました。スプレッドシートにそのまま貼り付けられます。"));
+        };
+
+        window.exportAsICS = function() {
+            let icsContent = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//SeasonBoard//JP\nCALSCALE:GREGORIAN\n"; 
+            const actualEvents = getActualDates(events);
+            
+            actualEvents.forEach(ev => {
+                if(!ev.actualDate) return;
+                const d = new Date(ev.actualDate);
+                let startStr = "", endStr = "";
+                
+                if (ev.time) {
+                    const [hh, mm] = ev.time.split(':');
+                    d.setHours(parseInt(hh), parseInt(mm), 0);
+                    let endD = new Date(d);
+                    if (ev.endTime) {
+                        const [ehh, emm] = ev.endTime.split(':');
+                        endD.setHours(parseInt(ehh), parseInt(emm), 0);
+                    } else {
+                        endD.setHours(endD.getHours() + 1);
+                    }
+                    startStr = d.toISOString().replace(/[-:]/g, '').split('.')[0] + "Z";
+                    endStr = endD.toISOString().replace(/[-:]/g, '').split('.')[0] + "Z";
+                } else {
+                    const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+                    const nD = new Date(d); nD.setDate(nD.getDate()+1);
+                    const ny = nD.getFullYear(), nm = String(nD.getMonth()+1).padStart(2,'0'), ndd = String(nD.getDate()).padStart(2,'0');
+                    startStr = `${y}${m}${dd}`;
+                    endStr = `${ny}${nm}${ndd}`;
+                }
+
+                icsContent += "BEGIN:VEVENT\n";
+                icsContent += `UID:${ev.id}@seasonboard\n`;
+                icsContent += `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z\n`;
+                if (ev.time) {
+                    icsContent += `DTSTART:${startStr}\nDTEND:${endStr}\n`;
+                } else {
+                    icsContent += `DTSTART;VALUE=DATE:${startStr}\nDTEND;VALUE=DATE:${endStr}\n`;
+                }
+                icsContent += `SUMMARY:${ev.text}\n`;
+                icsContent += "BEGIN:VALARM\nACTION:DISPLAY\nDESCRIPTION:リマインダー\n";
+                icsContent += `TRIGGER:${ev.time ? '-PT15M' : '-P1D'}\n`;
+                icsContent += "END:VALARM\nEND:VEVENT\n";
+            });
+            icsContent += "END:VCALENDAR";
+
+            const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = "season_events.ics"; a.click();
+            URL.revokeObjectURL(url);
+        };
+
+        // --- Notifications ---
+        window.requestNotificationPermission = function() {
+            if (!("Notification" in window)) {
+                alert("このブラウザはデスクトップ通知をサポートしていません。");
+            } else if (Notification.permission === "granted") {
+                alert("通知は既に許可されています。予定時刻の15分前に通知されます。");
+            } else if (Notification.permission !== "denied") {
+                Notification.requestPermission().then(permission => {
+                    if (permission === "granted") alert("通知を許可しました。");
+                });
+            }
+        };
+
+        function startNotificationService() {
+            if (Notification.permission !== "granted") return;
+            setInterval(() => {
+                const now = new Date();
+                const actualEvents = getActualDates(events);
+                const todayStr = now.toISOString().split('T')[0];
+                
+                const upcoming = actualEvents.filter(e => {
+                    if (e.actualDate !== todayStr || !e.time) return false;
+                    const [hh, mm] = e.time.split(':');
+                    const eventTime = new Date();
+                    eventTime.setHours(hh, mm, 0, 0);
+                    const diffMins = (eventTime - now) / (1000 * 60);
+                    return diffMins > 14 && diffMins <= 15;
+                });
+
+                upcoming.forEach(e => {
+                    new Notification("イベント間もなく開始！", {
+                        body: `${e.time} から「${e.text}」が始まります。`,
+                    });
+                });
+            }, 60000);
+        }
+
+        // --- Helpers ---
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        function buildColorPicker() {
+            const picker = document.getElementById('colorPicker');
+            picker.innerHTML = PRESET_COLORS.map(c => 
+                `<button class="color-btn w-8 h-8 rounded-full border-2 transition-transform scale-100 hover:scale-110" style="background-color:${c}" data-color="${c}"></button>`
+            ).join('');
+        }
+
+        function updateColorSelection() {
+            document.querySelectorAll('.color-btn').forEach(btn => {
+                if (btn.dataset.color === selectedColor) {
+                    btn.style.borderColor = 'white'; btn.classList.add('scale-110', 'shadow-md');
+                } else {
+                    btn.style.borderColor = 'transparent'; btn.classList.remove('scale-110', 'shadow-md');
+                }
+            });
+        }
+
+        document.getElementById('eventRepeatType').addEventListener('change', function(e) {
+            document.getElementById('repeatIntervalDiv').style.display = e.target.value === 'interval' ? 'block' : 'none';
+            document.getElementById('repeatWeeklyDiv').style.display = e.target.value === 'weekly' ? 'block' : 'none';
+        });
+
+        document.getElementById('colorPicker').addEventListener('click', (e) => {
+            if (e.target.classList.contains('color-btn')) {
+                selectedColor = e.target.dataset.color;
+                updateColorSelection();
+            }
+        });
+        
+        document.getElementById('btnDeleteEvent').addEventListener('click', () => {
+            if (currentEditingId) {
+                if (confirm("本当に削除しますか？")) {
+                    if(isEditingTemplate) {
+                        customTemplates = customTemplates.filter(t => t.id !== currentEditingId);
+                    } else {
+                        events = events.filter(e => e.id !== currentEditingId);
+                    }
+                    saveToLocalStorage(); updateAllViews(); closeModal('eventModal');
+                }
+            }
+        });
+
+        document.getElementById('btnReset').addEventListener('click', () => {
+            document.getElementById('confirmTitle').innerText = "初期データリセット";
+            document.getElementById('confirmMessage').innerText = "現在のスケジュールを全て消去し、デフォルトのイベントを再配置しますか？";
+            confirmAction = () => resetToInitialData(true);
+            document.getElementById('confirmModal').classList.add('active');
+        });
+
+        function setupUI() {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
+                    document.getElementById(btn.dataset.target).classList.add('active');
+                    updateAllViews();
+                });
+            });
+            document.getElementById('fabAdd').addEventListener('click', () => openEventModal(null, null));
+        }
+
+        // --- Default Data Initialization ---
+        function resetToInitialData(shouldUpdate = true) {
+            events = [];
+            customTemplates = [];
+            const gidS = eventGroups[0].id;
+            const gidE = eventGroups[1].id;
+            const gidM = eventGroups[2].id;
+
+            const colors = { pve: PRESET_COLORS[0], pvp: PRESET_COLORS[1], exp: PRESET_COLORS[2], daily: PRESET_COLORS[6], desert: PRESET_COLORS[4], misc: PRESET_COLORS[5] };
+
+            // Initialize Templates
+            const addTpl = (text, color, groupId) => customTemplates.push({ id: `tpl_${Date.now()}_${Math.random().toString(36).substr(2,5)}`, text, color, groupId });
+            addTpl('殲滅作戦', colors.pve, gidS); addTpl('拠点争奪戦', colors.pvp, gidS); addTpl('亡者の逆襲', colors.pve, gidS);
+            addTpl('虫狩りの達人', colors.pve, gidS); addTpl('都市争奪戦', colors.pvp, gidS); addTpl('議事堂争奪戦', colors.pvp, gidS);
+            addTpl('神殿争奪戦(Lv1)', colors.pvp, gidS); addTpl('神殿争奪戦(Lv1-2)', colors.pvp, gidS); addTpl('神殿争奪戦(Lv1-3)', colors.pvp, gidS); addTpl('神殿争奪戦(Lv1-4)', colors.pvp, gidS);
+            addTpl('陣営対決', colors.pvp, gidS); addTpl('金砂争奪戦', colors.desert, gidS); addTpl('砂漠の戦場', colors.desert, gidS);
+            addTpl('軍功交換所', colors.daily, gidM); addTpl('交易地(Lv1-2)', colors.misc, gidM); addTpl('交易地(Lv3-4)', colors.misc, gidM);
+            addTpl('世界遠征 1期', colors.exp, gidE); addTpl('世界遠征 2期', colors.exp, gidE); addTpl('世界遠征 3期', colors.exp, gidE); addTpl('陣営二択', colors.exp, gidE);
+
+            // Initialize Events
+            const addEvt = (day, text, color, groupId) => events.push({ id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, day, text, color, groupId, time: '' });
+
+            for (let d = 1; d <= 56; d++) {
+                if (d <= 7) addEvt(d, '殲滅作戦', colors.pve, gidS);
+                if (d <= 14) addEvt(d, '拠点争奪戦', colors.pvp, gidS);
+                if ([9, 12, 16, 19, 23, 26].includes(d)) addEvt(d, '亡者の逆襲', colors.pve, gidS);
+                if (d >= 15 && d <= 49) addEvt(d, '虫狩りの達人', colors.pve, gidS);
+                if ([3, 6, 10, 13, 17, 20].includes(d)) addEvt(d, '都市争奪戦', colors.pvp, gidS);
+                if (d === 28) addEvt(d, '議事堂争奪戦', colors.pvp, gidS);
+                if (d === 15) addEvt(d, '神殿争奪戦(Lv1)', colors.pvp, gidS);
+                if (d === 22) addEvt(d, '神殿争奪戦(Lv1-2)', colors.pvp, gidS);
+                if (d === 29) addEvt(d, '神殿争奪戦(Lv1-3)', colors.pvp, gidS);
+                if (d === 36) addEvt(d, '神殿争奪戦(Lv1-4)', colors.pvp, gidS);
+                if (d === 49) addEvt(d, '陣営対決', colors.pvp, gidS);
+                if ([24, 27, 31, 34, 38, 41, 45, 48].includes(d)) addEvt(d, '金砂争奪戦', colors.desert, gidS);
+                if ([5, 6, 12, 13, 19, 20, 26, 27, 33, 34, 40, 41, 47, 48, 54, 55].includes(d)) addEvt(d, '砂漠の戦場', colors.desert, gidS);
+                
+                addEvt(d, '軍功交換所', colors.daily, gidM);
+                if ([14, 21, 28, 35, 42].includes(d)) addEvt(d, '交易地(Lv1-2)', colors.misc, gidM);
+                if ([18, 25, 32, 39, 46].includes(d)) addEvt(d, '交易地(Lv3-4)', colors.misc, gidM);
+                
+                if (d >= 4 && d <= 17) addEvt(d, '世界遠征 1期', colors.exp, gidE);
+                if (d >= 18 && d <= 31) addEvt(d, '世界遠征 2期', colors.exp, gidE);
+                if (d >= 32 && d <= 49) addEvt(d, '世界遠征 3期', colors.exp, gidE);
+                if (d >= 15 && d <= 21) addEvt(d, '陣営二択', colors.exp, gidE);
+            }
+            saveToLocalStorage();
+            if (shouldUpdate) updateAllViews();
+        }
+
+        window.onload = initApp;
+    </script>
+</body>
+</html>
